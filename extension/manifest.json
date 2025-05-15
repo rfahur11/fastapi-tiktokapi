@@ -1,0 +1,11 @@
+{
+    "manifest_version": 3,
+    "name": "URL Catcher Bussiness",
+    "version": "1.0",
+    "permissions": ["webRequest", "storage"],
+    "host_permissions": ["https://bharatainternasional.com/*"],
+    "background": {
+      "service_worker": "background.js"
+    }
+  }
+  
