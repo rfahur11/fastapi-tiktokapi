@@ -1,4 +1,4 @@
-const socket = io('http://' + document.domain + ':' + location.port);
+const socket = io('http://' + document.domain + ':' + location.port, {path: '/socket.io/'});
 
 function startOAuth() {
     let oauthWindow = window.open('/oauth', '_blank', 'width=500,height=600');

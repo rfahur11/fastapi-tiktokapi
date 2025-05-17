@@ -1,8 +1,8 @@
 from pydantic_settings import BaseSettings
 import os
-from dotenv import load_dotenv
+# from dotenv import load_dotenv
 
-load_dotenv()
+# load_dotenv()
 
 class Settings(BaseSettings):
     APP_ID: str = os.getenv('APP_ID', '')

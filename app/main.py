@@ -1,5 +1,5 @@
 from fastapi import FastAPI, Request, Depends, Form, UploadFile, File, HTTPException
-from fastapi.responses import JSONResponse, RedirectResponse, FileResponse
+from fastapi.responses import JSONResponse, RedirectResponse, FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from fastapi.middleware.cors import CORSMiddleware
@@ -42,6 +42,14 @@ sio = socketio.AsyncServer(async_mode='asgi', cors_allowed_origins='*')
 socket_app = socketio.ASGIApp(sio)
 app.mount("/socket.io", socket_app)
 
+@sio.event
+async def connect(sid, environ):
+    print('Client connected', sid)
+
+@sio.event
+async def disconnect(sid):
+    print('Client disconnected', sid)
+
 # Setup static files and templates
 app.mount("/static", StaticFiles(directory=str(STATIC_PATH)), name="static")
 templates = Jinja2Templates(directory=str(BASE_PATH / "templates"))
@@ -58,7 +66,23 @@ async def index(request: Request):
 async def oauth_url():
     state = generate_csrf_state()
     auth_url = f"https://business-api.tiktok.com/portal/auth?app_id={settings.APP_ID}&state={state}&redirect_uri={settings.REDIRECT_URI}"
-    return RedirectResponse(url=auth_url)
+    # Instead of redirecting, return HTML that does the redirect for us
+    html_content = f"""
+    <!DOCTYPE html>
+    <html>
+        <head>
+            <title>Redirecting to TikTok OAuth</title>
+            <meta http-equiv="refresh" content="0;url={auth_url}">
+        </head>
+        <body>
+            <p>Redirecting to TikTok OAuth...</p>
+            <script>
+                window.location.href = "{auth_url}";
+            </script>
+        </body>
+    </html>
+    """
+    return HTMLResponse(content=html_content)
 
 @app.post("/callback")
 async def callback(data: Dict[str, str]):
@@ -405,21 +429,39 @@ async def analyze_campaign(advertiser_id: str, campaign_id: Optional[str] = None
         level = "ad" if campaign_id else "campaign"
         
         # Base URL untuk laporan
-        report_url = f"{settings.API_URL}/report/integrated/get/?advertiser_id={advertiser_id}"
-        report_url += "&metrics=[\"impressions\",\"clicks\",\"conversion\",\"spend\",\"ctr\",\"conversion_rate\",\"cpc\"]"
+        report_url = f"{settings.API_URL}/report/integrated/get/"
         
-        # Tambahkan filter campaign_id jika ada
+        # Buat parameter query sebagai dictionary
+        params = {
+            "advertiser_id": advertiser_id,
+            "report_type": "BASIC",
+            "metrics": json.dumps(["impressions", "clicks", "conversion", "spend", "ctr", "conversion_rate", "cpc"]),
+            "query_lifetime": "true",
+            "page_size": "1000"
+        }
+        
         if campaign_id:
-            report_url += f"&filtering={{\"campaign_ids\":[\"{campaign_id}\"]}}"
-            report_url += "&data_level=AUCTION_AD&dimensions=[\"ad_id\"]"
+            # Tambahkan parameter untuk level data dan dimensi
+            params["data_level"] = "AUCTION_AD"
+            params["dimensions"] = json.dumps(["ad_id"])
+            
+            # Tambahkan filter campaign_id dengan format yang benar
+            filter_obj = {"campaign_ids": [campaign_id]}
+            params["filtering"] = json.dumps(filter_obj)
         else:
-            report_url += "&data_level=AUCTION_CAMPAIGN&dimensions=[\"campaign_id\"]"
+            # Untuk level campaign
+            params["data_level"] = "AUCTION_CAMPAIGN"
+            params["dimensions"] = json.dumps(["campaign_id"])
         
-        # Tambahkan pengaturan lifetime dan pagination
-        report_url += "&query_lifetime=true&page_size=1000"
+        # Buat URL dengan parameter
+        query_string = "&".join([f"{k}={urllib.parse.quote(str(v))}" for k, v in params.items()])
+        final_url = f"{report_url}?{query_string}"
+        
+        # Debugging - print URL
+        print(f"DEBUG - Report URL: {final_url}")
         
         # Dapatkan laporan dari API TikTok
-        report_response, error = await make_api_request(report_url, headers={'Access-Token': access_token})
+        report_response, error = await make_api_request(final_url, headers={'Access-Token': access_token})
         if error:
             return JSONResponse(
                 status_code=400,
@@ -451,9 +493,10 @@ async def analyze_campaign(advertiser_id: str, campaign_id: Optional[str] = None
             "ranked_items": ranked_items
         }
     except Exception as e:
+        import traceback
         return JSONResponse(
             status_code=500,
-            content={"success": False, "message": f"Error analyzing campaign: {str(e)}"}
+            content={"success": False, "message": f"Error analyzing campaign: {str(e)}", "traceback": traceback.format_exc()}
         )
 
 @app.get("/get_latest_token")
@@ -461,10 +504,3 @@ async def get_latest_token_route():
     access_token = get_latest_token()
     return {"access_token": access_token}
 
-@sio.event
-async def connect(sid, environ):
-    print('Client connected', sid)
-
-@sio.event
-async def disconnect(sid):
-    print('Client disconnected', sid)
